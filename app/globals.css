@@ -1,0 +1,256 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 158 64% 52%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 158 64% 52%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 158 64% 52%;
+
+    --primary: 158 64% 52%;
+    --primary-foreground: 0 0% 98%;
+
+    --secondary: 152 24% 96%;
+    --secondary-foreground: 158 64% 20%;
+
+    --muted: 152 24% 96%;
+    --muted-foreground: 158 30% 45%;
+
+    --accent: 152 50% 88%;
+    --accent-foreground: 158 64% 20%;
+
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 0 0% 98%;
+
+    --border: 152 24% 90%;
+    --input: 152 24% 90%;
+    --ring: 158 64% 52%;
+
+    --chart-1: 158 64% 52%;
+    --chart-2: 152 50% 65%;
+    --chart-3: 146 38% 78%;
+    --chart-4: 140 26% 85%;
+    --chart-5: 134 14% 92%;
+
+    --radius: 0.75rem;
+  }
+
+  .dark {
+    --background: 158 50% 4%;
+    --foreground: 152 24% 96%;
+
+    --card: 158 50% 6%;
+    --card-foreground: 152 24% 96%;
+
+    --popover: 158 50% 6%;
+    --popover-foreground: 152 24% 96%;
+
+    --primary: 158 64% 52%;
+    --primary-foreground: 158 50% 4%;
+
+    --secondary: 158 30% 12%;
+    --secondary-foreground: 152 24% 96%;
+
+    --muted: 158 30% 12%;
+    --muted-foreground: 152 24% 65%;
+
+    --accent: 158 30% 16%;
+    --accent-foreground: 152 24% 96%;
+
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 0 0% 98%;
+
+    --border: 158 30% 16%;
+    --input: 158 30% 16%;
+    --ring: 158 64% 52%;
+
+    --chart-1: 158 64% 52%;
+    --chart-2: 152 50% 45%;
+    --chart-3: 146 38% 38%;
+    --chart-4: 140 26% 31%;
+    --chart-5: 134 14% 24%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-feature-settings: "rlig" 1, "calt" 1;
+  }
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+}
+
+::-webkit-scrollbar-track {
+  @apply bg-muted;
+}
+
+::-webkit-scrollbar-thumb {
+  @apply bg-primary/30 rounded-full;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  @apply bg-primary/50;
+}
+
+/* Smooth transitions for theme changes */
+* {
+  transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+}
+
+/* Enhanced focus states for better accessibility */
+.focus-visible:focus-visible {
+  @apply outline-none ring-2 ring-ring ring-offset-2 ring-offset-background;
+}
+
+/* Better chart styling for dark mode */
+.recharts-cartesian-grid-horizontal line,
+.recharts-cartesian-grid-vertical line {
+  @apply stroke-border;
+}
+
+.recharts-text {
+  @apply fill-muted-foreground;
+}
+
+/* Enhanced card hover effects */
+.card-hover {
+  @apply transition-all duration-200 hover:shadow-lg hover:shadow-primary/5 hover:border-primary/20;
+}
+
+/* Improved animations */
+@keyframes fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes scale-in {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes slide-in {
+  from {
+    opacity: 0;
+    transform: translateX(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.animate-fade-in {
+  animation: fade-in 0.3s ease-out;
+}
+
+.animate-scale-in {
+  animation: scale-in 0.2s ease-out;
+}
+
+.animate-slide-in {
+  animation: slide-in 0.3s ease-out;
+}
+
+/* Dark mode specific enhancements */
+.dark {
+  /* Better contrast for charts in dark mode */
+  --chart-1: 158 64% 60%;
+  --chart-2: 152 50% 55%;
+  --chart-3: 146 38% 50%;
+  --chart-4: 140 26% 45%;
+  --chart-5: 134 14% 40%;
+}
+
+/* Loading states */
+.loading-shimmer {
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.1), transparent);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+.dark .loading-shimmer {
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.05), transparent);
+  background-size: 200% 100%;
+}
+
+/* Chart improvements */
+.recharts-wrapper {
+  width: 100% !important;
+}
+
+.recharts-surface {
+  overflow: visible;
+}
+
+/* Better chart responsiveness */
+@media (max-width: 768px) {
+  .recharts-cartesian-axis-tick-value {
+    font-size: 10px !important;
+  }
+
+  .recharts-legend-wrapper {
+    font-size: 12px !important;
+  }
+}
+
+/* Chart tooltip improvements */
+.recharts-tooltip-wrapper {
+  z-index: 1000;
+}
+
+.recharts-tooltip-content {
+  border-radius: 8px !important;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06) !important;
+}
+
+/* Chart grid improvements */
+.recharts-cartesian-grid line {
+  opacity: 0.3;
+}
+
+/* Chart dot hover effects */
+.recharts-dot:hover {
+  r: 6;
+  transition: r 0.2s ease;
+}
+
+/* Chart bar hover effects */
+.recharts-bar-rectangle:hover {
+  opacity: 1 !important;
+  filter: brightness(1.1);
+  transition: all 0.2s ease;
+}

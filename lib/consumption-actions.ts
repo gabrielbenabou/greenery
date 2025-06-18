@@ -1,0 +1,1098 @@
+"use server"
+
+import { createServerActionClient } from "@supabase/auth-helpers-nextjs"
+import { cookies } from "next/headers"
+import { revalidatePath } from "next/cache"
+import type {
+  ConsumptionEntry,
+  RawProduct,
+  Consumable,
+  ToleranceTracking,
+  BudgetSettings,
+  BudgetAlert,
+  MoodTracking,
+  MoodCorrelation,
+  RawProductType,
+  ConsumableType,
+  ConsumptionMethod,
+} from "./types"
+import { RAW_PRODUCT_TYPES, CONSUMABLE_TYPES, CONSUMPTION_METHODS } from "./types"
+
+export async function addConsumption(prevState: any, formData: FormData) {
+  const cookieStore = cookies()
+  const supabase = createServerActionClient({ cookies: () => cookieStore })
+
+  try {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
+
+    if (!user) {
+      return { error: "User not authenticated" }
+    }
+
+    const consumable_id = formData.get("consumable_id") as string
+    const units_consumed = Number.parseInt(formData.get("units_consumed") as string)
+    const consumption_method = formData.get("consumption_method") as ConsumptionMethod
+    const notes = formData.get("notes") as string
+    const consumed_at = formData.get("consumed_at") as string
+
+    if (!consumable_id) {
+      return { error: "Please select a consumable" }
+    }
+
+    if (!units_consumed || units_consumed <= 0) {
+      return { error: "Please enter a valid number of units" }
+    }
+
+    if (!consumption_method || !CONSUMPTION_METHODS[consumption_method]) {
+      return { error: "Please select a consumption method" }
+    }
+
+    // Get consumable details
+    const { data: consumable } = await supabase
+      .from("consumables")
+      .select("*")
+      .eq("id", consumable_id)
+      .eq("user_id", user.id)
+      .single()
+
+    if (!consumable) {
+      return { error: "Consumable not found" }
+    }
+
+    if (consumable.quantity < units_consumed) {
+      return { error: `Not enough units available. You have ${consumable.quantity} units left.` }
+    }
+
+    const totalGrams = units_consumed * consumable.grams_per_unit
+
+    // Insert consumption entry
+    const { error: consumptionError } = await supabase.from("consumption_entries").insert({
+      user_id: user.id,
+      product_name: consumable.consumable_type,
+      amount: totalGrams,
+      unit: "g",
+      consumption_method,
+      consumable_id,
+      units_consumed,
+      notes: notes || null,
+      consumed_at: consumed_at || new Date().toISOString(),
+    })
+
+    if (consumptionError) {
+      console.error("Database error:", consumptionError)
+      return { error: "Failed to save consumption entry" }
+    }
+
+    // Update consumable quantity
+    const newQuantity = consumable.quantity - units_consumed
+    const { error: updateError } = await supabase
+      .from("consumables")
+      .update({
+        quantity: newQuantity,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", consumable_id)
+
+    if (updateError) {
+      console.error("Update error:", updateError)
+      return { error: "Failed to update consumable quantity" }
+    }
+
+    revalidatePath("/")
+    return { success: "Session tracked successfully!" }
+  } catch (error) {
+    console.error("Add consumption error:", error)
+    return { error: "An unexpected error occurred" }
+  }
+}
+
+export async function addRawProduct(prevState: any, formData: FormData) {
+  const cookieStore = cookies()
+  const supabase = createServerActionClient({ cookies: () => cookieStore })
+
+  try {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
+
+    if (!user) {
+      return { error: "User not authenticated" }
+    }
+
+    const product_type = formData.get("product_type") as RawProductType
+    const strain_name = formData.get("strain_name") as string
+    const source = formData.get("source") as string
+    const quality_notes = formData.get("quality_notes") as string
+    const thc_content = formData.get("thc_content") ? Number.parseFloat(formData.get("thc_content") as string) : null
+    const current_amount = Number.parseFloat(formData.get("current_amount") as string)
+    const cost = formData.get("cost") ? Number.parseFloat(formData.get("cost") as string) : null
+    const purchase_date = formData.get("purchase_date") as string
+
+    if (!product_type || !RAW_PRODUCT_TYPES[product_type]) {
+      return { error: "Please select a valid product type" }
+    }
+
+    if (!strain_name) {
+      return { error: "Please enter a strain/product name" }
+    }
+
+    if (!current_amount || current_amount <= 0) {
+      return { error: "Please enter a valid amount" }
+    }
+
+    if (thc_content && (thc_content < 0 || thc_content > 100)) {
+      return { error: "THC content must be between 0 and 100%" }
+    }
+
+    const { error } = await supabase.from("raw_products").insert({
+      user_id: user.id,
+      product_type,
+      strain_name,
+      source: source || null,
+      quality_notes: quality_notes || null,
+      thc_content: thc_content || null,
+      current_amount,
+      original_amount: current_amount,
+      unit: RAW_PRODUCT_TYPES[product_type].defaultUnit,
+      cost: cost || null,
+      purchase_date: purchase_date || new Date().toISOString(),
+    })
+
+    if (error) {
+      console.error("Database error:", error)
+      return { error: "Failed to add raw product" }
+    }
+
+    // Check budget alerts after purchase
+    if (cost && cost > 0) {
+      await checkBudgetAlerts(user.id)
+    }
+
+    revalidatePath("/")
+    return { success: "Raw product added successfully!" }
+  } catch (error) {
+    console.error("Add raw product error:", error)
+    return { error: "An unexpected error occurred" }
+  }
+}
+
+export async function addInventory(prevState: any, formData: FormData) {
+  // This is an alias for addRawProduct to maintain compatibility
+  return await addRawProduct(prevState, formData)
+}
+
+export async function convertToConsumable(prevState: any, formData: FormData) {
+  const cookieStore = cookies()
+  const supabase = createServerActionClient({ cookies: () => cookieStore })
+
+  try {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
+
+    if (!user) {
+      return { error: "User not authenticated" }
+    }
+
+    const raw_product_id = formData.get("raw_product_id") as string
+    const consumable_type = formData.get("consumable_type") as ConsumableType
+    const name = formData.get("name") as string
+    const units_to_create = Number.parseInt(formData.get("units_to_create") as string)
+    const grams_per_unit = Number.parseFloat(formData.get("grams_per_unit") as string)
+    const notes = formData.get("notes") as string
+
+    if (!raw_product_id) {
+      return { error: "Please select a raw product" }
+    }
+
+    if (!consumable_type || !CONSUMABLE_TYPES[consumable_type]) {
+      return { error: "Please select a valid consumable type" }
+    }
+
+    if (!name) {
+      return { error: "Please enter a name for the consumable" }
+    }
+
+    if (!units_to_create || units_to_create <= 0) {
+      return { error: "Please enter a valid number of units to create" }
+    }
+
+    if (!grams_per_unit || grams_per_unit <= 0) {
+      return { error: "Please enter a valid grams per unit" }
+    }
+
+    const total_grams_needed = units_to_create * grams_per_unit
+
+    // Check if raw product has enough material
+    const { data: rawProduct } = await supabase
+      .from("raw_products")
+      .select("*")
+      .eq("id", raw_product_id)
+      .eq("user_id", user.id)
+      .single()
+
+    if (!rawProduct) {
+      return { error: "Raw product not found" }
+    }
+
+    if (Number(rawProduct.current_amount) < total_grams_needed) {
+      return { error: `Not enough material. Available: ${rawProduct.current_amount}g, Needed: ${total_grams_needed}g` }
+    }
+
+    // Create consumable
+    const { data: consumable, error: consumableError } = await supabase
+      .from("consumables")
+      .insert({
+        user_id: user.id,
+        consumable_type,
+        name,
+        quantity: units_to_create,
+        grams_per_unit,
+        source_strain: rawProduct.strain_name,
+        thc_content: rawProduct.thc_content,
+        notes: notes || null,
+      })
+      .select()
+      .single()
+
+    if (consumableError) {
+      console.error("Database error:", consumableError)
+      return { error: "Failed to create consumable" }
+    }
+
+    // Record conversion
+    const { error: conversionError } = await supabase.from("conversions").insert({
+      user_id: user.id,
+      raw_product_id,
+      consumable_id: consumable.id,
+      grams_used: total_grams_needed,
+      units_created: units_to_create,
+      notes: notes || null,
+    })
+
+    if (conversionError) {
+      console.error("Conversion error:", conversionError)
+      return { error: "Failed to record conversion" }
+    }
+
+    // Update raw product amount
+    const new_amount = Number(rawProduct.current_amount) - total_grams_needed
+    const { error: updateError } = await supabase
+      .from("raw_products")
+      .update({
+        current_amount: new_amount,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", raw_product_id)
+
+    if (updateError) {
+      console.error("Update error:", updateError)
+      return { error: "Failed to update raw product amount" }
+    }
+
+    revalidatePath("/")
+    return { success: `Successfully created ${units_to_create} ${consumable_type.toLowerCase()}!` }
+  } catch (error) {
+    console.error("Convert to consumable error:", error)
+    return { error: "An unexpected error occurred" }
+  }
+}
+
+export async function addToleranceEntry(prevState: any, formData: FormData) {
+  const cookieStore = cookies()
+  const supabase = createServerActionClient({ cookies: () => cookieStore })
+
+  try {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
+
+    if (!user) {
+      return { error: "User not authenticated" }
+    }
+
+    const tracking_date = formData.get("tracking_date") as string
+    const baseline_amount = Number.parseFloat(formData.get("baseline_amount") as string)
+    const effectiveness_rating = Number.parseInt(formData.get("effectiveness_rating") as string)
+    const tolerance_break_start = formData.get("tolerance_break_start") as string
+    const tolerance_break_end = formData.get("tolerance_break_end") as string
+    const notes = formData.get("notes") as string
+
+    if (!baseline_amount || baseline_amount <= 0) {
+      return { error: "Please enter a valid baseline amount" }
+    }
+
+    if (!effectiveness_rating || effectiveness_rating < 1 || effectiveness_rating > 10) {
+      return { error: "Effectiveness rating must be between 1 and 10" }
+    }
+
+    const { error } = await supabase.from("tolerance_tracking").insert({
+      user_id: user.id,
+      tracking_date: tracking_date || new Date().toISOString().split("T")[0],
+      baseline_amount,
+      effectiveness_rating,
+      tolerance_break_start: tolerance_break_start || null,
+      tolerance_break_end: tolerance_break_end || null,
+      notes: notes || null,
+    })
+
+    if (error) {
+      console.error("Database error:", error)
+      return { error: "Failed to add tolerance entry" }
+    }
+
+    revalidatePath("/")
+    return { success: "Tolerance entry added successfully!" }
+  } catch (error) {
+    console.error("Add tolerance entry error:", error)
+    return { error: "An unexpected error occurred" }
+  }
+}
+
+export async function updateBudgetSettings(prevState: any, formData: FormData) {
+  const cookieStore = cookies()
+  const supabase = createServerActionClient({ cookies: () => cookieStore })
+
+  try {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
+
+    if (!user) {
+      return { error: "User not authenticated" }
+    }
+
+    const monthly_budget = Number.parseFloat(formData.get("monthly_budget") as string)
+    const weekly_budget = formData.get("weekly_budget")
+      ? Number.parseFloat(formData.get("weekly_budget") as string)
+      : null
+    const alert_threshold = Number.parseFloat(formData.get("alert_threshold") as string)
+    const email_alerts = formData.get("email_alerts") === "on"
+    const push_alerts = formData.get("push_alerts") === "on"
+
+    if (!monthly_budget || monthly_budget <= 0) {
+      return { error: "Please enter a valid monthly budget" }
+    }
+
+    if (!alert_threshold || alert_threshold < 0 || alert_threshold > 100) {
+      return { error: "Alert threshold must be between 0 and 100%" }
+    }
+
+    const { error } = await supabase.from("budget_settings").upsert({
+      user_id: user.id,
+      monthly_budget,
+      weekly_budget,
+      alert_threshold,
+      email_alerts,
+      push_alerts,
+      updated_at: new Date().toISOString(),
+    })
+
+    if (error) {
+      console.error("Database error:", error)
+      return { error: "Failed to update budget settings" }
+    }
+
+    revalidatePath("/")
+    return { success: "Budget settings updated successfully!" }
+  } catch (error) {
+    console.error("Update budget settings error:", error)
+    return { error: "An unexpected error occurred" }
+  }
+}
+
+async function checkBudgetAlerts(userId: string) {
+  const cookieStore = cookies()
+  const supabase = createServerActionClient({ cookies: () => cookieStore })
+
+  try {
+    // Get budget settings
+    const { data: budgetSettings } = await supabase.from("budget_settings").select("*").eq("user_id", userId).single()
+
+    if (!budgetSettings) return
+
+    // Calculate current month spending
+    const startOfMonth = new Date()
+    startOfMonth.setDate(1)
+    startOfMonth.setHours(0, 0, 0, 0)
+
+    const { data: monthlySpending } = await supabase
+      .from("raw_products")
+      .select("cost")
+      .eq("user_id", userId)
+      .gte("purchase_date", startOfMonth.toISOString())
+
+    const totalMonthlySpending = monthlySpending?.reduce((sum, item) => sum + (Number(item.cost) || 0), 0) || 0
+    const monthlyPercentage = (totalMonthlySpending / budgetSettings.monthly_budget) * 100
+
+    // Check if we need to create an alert
+    if (monthlyPercentage >= budgetSettings.alert_threshold) {
+      const alertType = monthlyPercentage >= 100 ? "budget_exceeded" : "monthly_threshold"
+
+      // Check if alert already exists for this month
+      const { data: existingAlert } = await supabase
+        .from("budget_alerts")
+        .select("id")
+        .eq("user_id", userId)
+        .eq("alert_type", alertType)
+        .gte("alert_date", startOfMonth.toISOString())
+        .single()
+
+      if (!existingAlert) {
+        await supabase.from("budget_alerts").insert({
+          user_id: userId,
+          alert_type: alertType,
+          current_spending: totalMonthlySpending,
+          budget_limit: budgetSettings.monthly_budget,
+          percentage_used: monthlyPercentage,
+        })
+      }
+    }
+  } catch (error) {
+    console.error("Budget alert check error:", error)
+  }
+}
+
+export async function getRawProducts() {
+  const cookieStore = cookies()
+  const supabase = createServerActionClient({ cookies: () => cookieStore })
+
+  try {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
+
+    if (!user) {
+      return { data: [], error: "User not authenticated" }
+    }
+
+    const { data, error } = await supabase
+      .from("raw_products")
+      .select("*")
+      .eq("user_id", user.id)
+      .order("created_at", { ascending: false })
+
+    if (error) {
+      console.error("Database error:", error)
+      return { data: [], error: "Failed to fetch raw products" }
+    }
+
+    return { data: data as RawProduct[], error: null }
+  } catch (error) {
+    console.error("Get raw products error:", error)
+    return { data: [], error: "An unexpected error occurred" }
+  }
+}
+
+export async function getConsumables() {
+  const cookieStore = cookies()
+  const supabase = createServerActionClient({ cookies: () => cookieStore })
+
+  try {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
+
+    if (!user) {
+      return { data: [], error: "User not authenticated" }
+    }
+
+    const { data, error } = await supabase
+      .from("consumables")
+      .select("*")
+      .eq("user_id", user.id)
+      .order("created_at", { ascending: false })
+
+    if (error) {
+      console.error("Database error:", error)
+      return { data: [], error: "Failed to fetch consumables" }
+    }
+
+    return { data: data as Consumable[], error: null }
+  } catch (error) {
+    console.error("Get consumables error:", error)
+    return { data: [], error: "An unexpected error occurred" }
+  }
+}
+
+export async function getToleranceTracking() {
+  const cookieStore = cookies()
+  const supabase = createServerActionClient({ cookies: () => cookieStore })
+
+  try {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
+
+    if (!user) {
+      return { data: [], error: "User not authenticated" }
+    }
+
+    const { data, error } = await supabase
+      .from("tolerance_tracking")
+      .select("*")
+      .eq("user_id", user.id)
+      .order("tracking_date", { ascending: false })
+
+    if (error) {
+      console.error("Database error:", error)
+      return { data: [], error: "Failed to fetch tolerance tracking" }
+    }
+
+    return { data: data as ToleranceTracking[], error: null }
+  } catch (error) {
+    console.error("Get tolerance tracking error:", error)
+    return { data: [], error: "An unexpected error occurred" }
+  }
+}
+
+export async function getBudgetSettings() {
+  const cookieStore = cookies()
+  const supabase = createServerActionClient({ cookies: () => cookieStore })
+
+  try {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
+
+    if (!user) {
+      return { data: null, error: "User not authenticated" }
+    }
+
+    const { data, error } = await supabase.from("budget_settings").select("*").eq("user_id", user.id).single()
+
+    if (error && error.code !== "PGRST116") {
+      // PGRST116 is "not found"
+      console.error("Database error:", error)
+      return { data: null, error: "Failed to fetch budget settings" }
+    }
+
+    return { data: data as BudgetSettings | null, error: null }
+  } catch (error) {
+    console.error("Get budget settings error:", error)
+    return { data: null, error: "An unexpected error occurred" }
+  }
+}
+
+export async function getBudgetAlerts() {
+  const cookieStore = cookies()
+  const supabase = createServerActionClient({ cookies: () => cookieStore })
+
+  try {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
+
+    if (!user) {
+      return { data: [], error: "User not authenticated" }
+    }
+
+    const { data, error } = await supabase
+      .from("budget_alerts")
+      .select("*")
+      .eq("user_id", user.id)
+      .eq("acknowledged", false)
+      .order("alert_date", { ascending: false })
+
+    if (error) {
+      console.error("Database error:", error)
+      return { data: [], error: "Failed to fetch budget alerts" }
+    }
+
+    return { data: data as BudgetAlert[], error: null }
+  } catch (error) {
+    console.error("Get budget alerts error:", error)
+    return { data: [], error: "An unexpected error occurred" }
+  }
+}
+
+export async function acknowledgeAlert(alertId: string) {
+  const cookieStore = cookies()
+  const supabase = createServerActionClient({ cookies: () => cookieStore })
+
+  try {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
+
+    if (!user) {
+      return { error: "User not authenticated" }
+    }
+
+    const { error } = await supabase
+      .from("budget_alerts")
+      .update({
+        acknowledged: true,
+        acknowledged_at: new Date().toISOString(),
+      })
+      .eq("id", alertId)
+      .eq("user_id", user.id)
+
+    if (error) {
+      console.error("Database error:", error)
+      return { error: "Failed to acknowledge alert" }
+    }
+
+    revalidatePath("/")
+    return { success: "Alert acknowledged" }
+  } catch (error) {
+    console.error("Acknowledge alert error:", error)
+    return { error: "An unexpected error occurred" }
+  }
+}
+
+export async function getConsumptionEntries(limit = 50) {
+  const cookieStore = cookies()
+  const supabase = createServerActionClient({ cookies: () => cookieStore })
+
+  try {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
+
+    if (!user) {
+      return { data: [], error: "User not authenticated" }
+    }
+
+    const { data, error } = await supabase
+      .from("consumption_entries")
+      .select("*")
+      .eq("user_id", user.id)
+      .order("consumed_at", { ascending: false })
+      .limit(limit)
+
+    if (error) {
+      console.error("Database error:", error)
+      return { data: [], error: "Failed to fetch consumption entries" }
+    }
+
+    return { data: data as ConsumptionEntry[], error: null }
+  } catch (error) {
+    console.error("Get consumption entries error:", error)
+    return { data: [], error: "An unexpected error occurred" }
+  }
+}
+
+export async function getConsumptionStats() {
+  const cookieStore = cookies()
+  const supabase = createServerActionClient({ cookies: () => cookieStore })
+
+  try {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
+
+    if (!user) {
+      return { data: null, error: "User not authenticated" }
+    }
+
+    // Get consumption data for the last 30 days
+    const thirtyDaysAgo = new Date()
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30)
+
+    const { data, error } = await supabase
+      .from("consumption_entries")
+      .select("consumed_at, amount, product_name, rating, consumption_method")
+      .eq("user_id", user.id)
+      .gte("consumed_at", thirtyDaysAgo.toISOString())
+      .order("consumed_at", { ascending: true })
+
+    if (error) {
+      console.error("Database error:", error)
+      return { data: null, error: "Failed to fetch consumption stats" }
+    }
+
+    return { data: data as ConsumptionEntry[], error: null }
+  } catch (error) {
+    console.error("Get consumption stats error:", error)
+    return { data: null, error: "An unexpected error occurred" }
+  }
+}
+
+// Add mood tracking function
+export async function addMoodTracking(prevState: any, formData: FormData) {
+  const cookieStore = cookies()
+  const supabase = createServerActionClient({ cookies: () => cookieStore })
+
+  try {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
+
+    if (!user) {
+      return { error: "User not authenticated" }
+    }
+
+    const consumption_entry_id = formData.get("consumption_entry_id") as string
+    const pre_mood_energy = Number.parseInt(formData.get("pre_mood_energy") as string)
+    const pre_mood_happiness = Number.parseInt(formData.get("pre_mood_happiness") as string)
+    const pre_mood_stress = Number.parseInt(formData.get("pre_mood_stress") as string)
+    const pre_mood_focus = Number.parseInt(formData.get("pre_mood_focus") as string)
+    const pre_mood_anxiety = Number.parseInt(formData.get("pre_mood_anxiety") as string)
+    const pre_mood_pain = Number.parseInt(formData.get("pre_mood_pain") as string)
+
+    const post_mood_energy = formData.get("post_mood_energy")
+      ? Number.parseInt(formData.get("post_mood_energy") as string)
+      : null
+    const post_mood_happiness = formData.get("post_mood_happiness")
+      ? Number.parseInt(formData.get("post_mood_happiness") as string)
+      : null
+    const post_mood_stress = formData.get("post_mood_stress")
+      ? Number.parseInt(formData.get("post_mood_stress") as string)
+      : null
+    const post_mood_focus = formData.get("post_mood_focus")
+      ? Number.parseInt(formData.get("post_mood_focus") as string)
+      : null
+    const post_mood_anxiety = formData.get("post_mood_anxiety")
+      ? Number.parseInt(formData.get("post_mood_anxiety") as string)
+      : null
+    const post_mood_pain = formData.get("post_mood_pain")
+      ? Number.parseInt(formData.get("post_mood_pain") as string)
+      : null
+
+    const effects_onset_minutes = formData.get("effects_onset_minutes")
+      ? Number.parseInt(formData.get("effects_onset_minutes") as string)
+      : null
+    const effects_duration_minutes = formData.get("effects_duration_minutes")
+      ? Number.parseInt(formData.get("effects_duration_minutes") as string)
+      : null
+    const effects_intensity = formData.get("effects_intensity")
+      ? Number.parseInt(formData.get("effects_intensity") as string)
+      : null
+
+    const side_effects = formData.getAll("side_effects") as string[]
+    const mood_notes = formData.get("mood_notes") as string
+    const environment = formData.get("environment") as string
+    const activity = formData.get("activity") as string
+
+    if (!consumption_entry_id) {
+      return { error: "Consumption entry ID is required" }
+    }
+
+    // Validate mood ratings
+    const preMoodValues = [
+      pre_mood_energy,
+      pre_mood_happiness,
+      pre_mood_stress,
+      pre_mood_focus,
+      pre_mood_anxiety,
+      pre_mood_pain,
+    ]
+    if (preMoodValues.some((val) => val < 1 || val > 10)) {
+      return { error: "All pre-consumption mood ratings must be between 1 and 10" }
+    }
+
+    const { error } = await supabase.from("mood_tracking").insert({
+      user_id: user.id,
+      consumption_entry_id,
+      pre_mood_energy,
+      pre_mood_happiness,
+      pre_mood_stress,
+      pre_mood_focus,
+      pre_mood_anxiety,
+      pre_mood_pain,
+      post_mood_energy,
+      post_mood_happiness,
+      post_mood_stress,
+      post_mood_focus,
+      post_mood_anxiety,
+      post_mood_pain,
+      effects_onset_minutes,
+      effects_duration_minutes,
+      effects_intensity,
+      side_effects: side_effects.length > 0 ? side_effects : null,
+      mood_notes: mood_notes || null,
+      environment: environment || null,
+      activity: activity || null,
+    })
+
+    if (error) {
+      console.error("Database error:", error)
+      return { error: "Failed to save mood tracking data" }
+    }
+
+    // Update mood correlations
+    await updateMoodCorrelations(user.id, consumption_entry_id)
+
+    revalidatePath("/")
+    return { success: "Mood tracking data saved successfully!" }
+  } catch (error) {
+    console.error("Add mood tracking error:", error)
+    return { error: "An unexpected error occurred" }
+  }
+}
+
+// Update post-consumption mood
+export async function updatePostMood(prevState: any, formData: FormData) {
+  const cookieStore = cookies()
+  const supabase = createServerActionClient({ cookies: () => cookieStore })
+
+  try {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
+
+    if (!user) {
+      return { error: "User not authenticated" }
+    }
+
+    const mood_tracking_id = formData.get("mood_tracking_id") as string
+    const post_mood_energy = Number.parseInt(formData.get("post_mood_energy") as string)
+    const post_mood_happiness = Number.parseInt(formData.get("post_mood_happiness") as string)
+    const post_mood_stress = Number.parseInt(formData.get("post_mood_stress") as string)
+    const post_mood_focus = Number.parseInt(formData.get("post_mood_focus") as string)
+    const post_mood_anxiety = Number.parseInt(formData.get("post_mood_anxiety") as string)
+    const post_mood_pain = Number.parseInt(formData.get("post_mood_pain") as string)
+
+    const effects_onset_minutes = formData.get("effects_onset_minutes")
+      ? Number.parseInt(formData.get("effects_onset_minutes") as string)
+      : null
+    const effects_duration_minutes = formData.get("effects_duration_minutes")
+      ? Number.parseInt(formData.get("effects_duration_minutes") as string)
+      : null
+    const effects_intensity = formData.get("effects_intensity")
+      ? Number.parseInt(formData.get("effects_intensity") as string)
+      : null
+
+    const experience_rating = formData.get("experience_rating")
+      ? Number.parseInt(formData.get("experience_rating") as string)
+      : null
+
+    const side_effects = formData.getAll("side_effects") as string[]
+    const mood_notes = formData.get("mood_notes") as string
+
+    if (!mood_tracking_id) {
+      return { error: "Mood tracking ID is required" }
+    }
+
+    // Validate mood ratings
+    const postMoodValues = [
+      post_mood_energy,
+      post_mood_happiness,
+      post_mood_stress,
+      post_mood_focus,
+      post_mood_anxiety,
+      post_mood_pain,
+    ]
+    if (postMoodValues.some((val) => val < 1 || val > 10)) {
+      return { error: "All post-consumption mood ratings must be between 1 and 10" }
+    }
+
+    if (experience_rating && (experience_rating < 1 || experience_rating > 5)) {
+      return { error: "Experience rating must be between 1 and 5" }
+    }
+
+    const { error } = await supabase
+      .from("mood_tracking")
+      .update({
+        post_mood_energy,
+        post_mood_happiness,
+        post_mood_stress,
+        post_mood_focus,
+        post_mood_anxiety,
+        post_mood_pain,
+        effects_onset_minutes,
+        effects_duration_minutes,
+        effects_intensity,
+        experience_rating,
+        side_effects: side_effects.length > 0 ? side_effects : null,
+        mood_notes: mood_notes || null,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", mood_tracking_id)
+      .eq("user_id", user.id)
+
+    if (error) {
+      console.error("Database error:", error)
+      return { error: "Failed to update mood tracking data" }
+    }
+
+    revalidatePath("/")
+    return { success: "Post-consumption mood updated successfully!" }
+  } catch (error) {
+    console.error("Update post mood error:", error)
+    return { error: "An unexpected error occurred" }
+  }
+}
+
+// Helper function to update mood correlations
+async function updateMoodCorrelations(userId: string, consumptionEntryId: string) {
+  const cookieStore = cookies()
+  const supabase = createServerActionClient({ cookies: () => cookieStore })
+
+  try {
+    // Get consumption entry details
+    const { data: entry } = await supabase
+      .from("consumption_entries")
+      .select("product_name, consumption_method")
+      .eq("id", consumptionEntryId)
+      .single()
+
+    if (!entry) return
+
+    // Get all mood tracking data for this strain/method combination
+    const { data: moodData } = await supabase
+      .from("mood_tracking")
+      .select(`
+        *,
+        consumption_entries!inner(product_name, consumption_method)
+      `)
+      .eq("user_id", userId)
+      .eq("consumption_entries.product_name", entry.product_name)
+      .eq("consumption_entries.consumption_method", entry.consumption_method)
+      .not("post_mood_energy", "is", null)
+
+    if (!moodData || moodData.length === 0) return
+
+    // Calculate averages
+    const avgChanges = moodData.reduce(
+      (acc, mood) => {
+        acc.energy += mood.post_mood_energy - mood.pre_mood_energy
+        acc.happiness += mood.post_mood_happiness - mood.pre_mood_happiness
+        acc.stress += mood.post_mood_stress - mood.pre_mood_stress
+        acc.focus += mood.post_mood_focus - mood.pre_mood_focus
+        acc.anxiety += mood.post_mood_anxiety - mood.pre_mood_anxiety
+        acc.pain += mood.post_mood_pain - mood.pre_mood_pain
+        return acc
+      },
+      { energy: 0, happiness: 0, stress: 0, focus: 0, anxiety: 0, pain: 0 },
+    )
+
+    const count = moodData.length
+    Object.keys(avgChanges).forEach((key) => {
+      avgChanges[key] = avgChanges[key] / count
+    })
+
+    // Upsert mood correlation
+    await supabase.from("mood_correlations").upsert({
+      user_id: userId,
+      strain_name: entry.product_name,
+      consumption_method: entry.consumption_method,
+      avg_energy_change: avgChanges.energy,
+      avg_happiness_change: avgChanges.happiness,
+      avg_stress_change: avgChanges.stress,
+      avg_focus_change: avgChanges.focus,
+      avg_anxiety_change: avgChanges.anxiety,
+      avg_pain_change: avgChanges.pain,
+      sessions_count: count,
+      last_updated: new Date().toISOString(),
+    })
+  } catch (error) {
+    console.error("Update mood correlations error:", error)
+  }
+}
+
+// Get mood tracking data
+export async function getMoodTracking() {
+  const cookieStore = cookies()
+  const supabase = createServerActionClient({ cookies: () => cookieStore })
+
+  try {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
+
+    if (!user) {
+      return { data: [], error: "User not authenticated" }
+    }
+
+    const { data, error } = await supabase
+      .from("mood_tracking")
+      .select(`
+        *,
+        consumption_entries(product_name, consumption_method, consumed_at, amount)
+      `)
+      .eq("user_id", user.id)
+      .order("created_at", { ascending: false })
+
+    if (error) {
+      console.error("Database error:", error)
+      return { data: [], error: "Failed to fetch mood tracking data" }
+    }
+
+    return { data: data as (MoodTracking & { consumption_entries: any })[], error: null }
+  } catch (error) {
+    console.error("Get mood tracking error:", error)
+    return { data: [], error: "An unexpected error occurred" }
+  }
+}
+
+// Get mood correlations
+export async function getMoodCorrelations() {
+  const cookieStore = cookies()
+  const supabase = createServerActionClient({ cookies: () => cookieStore })
+
+  try {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
+
+    if (!user) {
+      return { data: [], error: "User not authenticated" }
+    }
+
+    const { data, error } = await supabase
+      .from("mood_correlations")
+      .select("*")
+      .eq("user_id", user.id)
+      .order("sessions_count", { ascending: false })
+
+    if (error) {
+      console.error("Database error:", error)
+      return { data: [], error: "Failed to fetch mood correlations" }
+    }
+
+    return { data: data as MoodCorrelation[], error: null }
+  } catch (error) {
+    console.error("Get mood correlations error:", error)
+    return { data: [], error: "An unexpected error occurred" }
+  }
+}
+
+// Get pending mood updates (sessions without post-mood data)
+export async function getPendingMoodUpdates() {
+  const cookieStore = cookies()
+  const supabase = createServerActionClient({ cookies: () => cookieStore })
+
+  try {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
+
+    if (!user) {
+      return { data: [], error: "User not authenticated" }
+    }
+
+    // Get consumption entries from the last 24 hours that don't have mood tracking yet
+    const twentyFourHoursAgo = new Date()
+    twentyFourHoursAgo.setHours(twentyFourHoursAgo.getHours() - 24)
+
+    const { data, error } = await supabase
+      .from("consumption_entries")
+      .select(`
+        *,
+        mood_tracking(id, post_mood_energy)
+      `)
+      .eq("user_id", user.id)
+      .gte("consumed_at", twentyFourHoursAgo.toISOString())
+      .order("consumed_at", { ascending: false })
+
+    if (error) {
+      console.error("Database error:", error)
+      return { data: [], error: "Failed to fetch pending mood updates" }
+    }
+
+    // Filter entries that either have no mood tracking or incomplete mood tracking
+    const pendingEntries = data.filter(
+      (entry) =>
+        !entry.mood_tracking || entry.mood_tracking.length === 0 || entry.mood_tracking[0].post_mood_energy === null,
+    )
+
+    return { data: pendingEntries, error: null }
+  } catch (error) {
+    console.error("Get pending mood updates error:", error)
+    return { data: [], error: "An unexpected error occurred" }
+  }
+}

@@ -25,7 +25,7 @@ import {
 // Helper function to create Supabase client for server actions
 async function createSupabaseServerActionClient() {
     const cookieStore = await cookies()
-
+    
     return createServerClient(
         process.env.NEXT_PUBLIC_SUPABASE_URL!,
         process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
@@ -141,7 +141,7 @@ export async function addConsumption(prevState: any, formData: FormData) {
 
 export async function addRawProduct(prevState: any, formData: FormData) {
     const supabase = await createSupabaseServerActionClient()
-
+    
 
     try {
         const {
@@ -216,7 +216,7 @@ export async function addInventory(prevState: any, formData: FormData) {
 
 export async function convertToConsumable(prevState: any, formData: FormData) {
     const supabase = await createSupabaseServerActionClient()
-
+    
 
     try {
         const {
@@ -333,7 +333,7 @@ export async function convertToConsumable(prevState: any, formData: FormData) {
 
 export async function addToleranceEntry(prevState: any, formData: FormData) {
     const supabase = await createSupabaseServerActionClient()
-
+    
 
     try {
         const {
@@ -384,7 +384,7 @@ export async function addToleranceEntry(prevState: any, formData: FormData) {
 
 export async function updateBudgetSettings(prevState: any, formData: FormData) {
     const supabase = await createSupabaseServerActionClient()
-
+    
 
     try {
         const {
@@ -436,7 +436,7 @@ export async function updateBudgetSettings(prevState: any, formData: FormData) {
 
 async function checkBudgetAlerts(userId: string) {
     const supabase = await createSupabaseServerActionClient()
-
+    
 
     try {
         // Get budget settings
@@ -488,7 +488,7 @@ async function checkBudgetAlerts(userId: string) {
 
 export async function getRawProducts() {
     const supabase = await createSupabaseServerActionClient()
-
+    
 
     try {
         const {
@@ -517,44 +517,9 @@ export async function getRawProducts() {
     }
 }
 
-export async function getConsumables(includeArchived = false) {
+export async function getConsumables() {
     const supabase = await createSupabaseServerActionClient()
-
-
-    try {
-        const {
-            data: { user },
-        } = await supabase.auth.getUser()
-
-        if (!user) {
-            return { data: [], error: "User not authenticated" }
-        }
-
-        let query = supabase
-            .from("consumables")
-            .select("*")
-            .eq("user_id", user.id)
-
-        if (!includeArchived) {
-            query = query.or("archived.is.null,archived.eq.false")
-        }
-
-        const { data, error } = await query.order("created_at", { ascending: false })
-
-        if (error) {
-            console.error("Database error:", error)
-            return { data: [], error: "Failed to fetch consumables" }
-        }
-
-        return { data: data as Consumable[], error: null }
-    } catch (error) {
-        console.error("Get consumables error:", error)
-        return { data: [], error: "An unexpected error occurred" }
-    }
-}
-
-export async function getArchivedConsumables() {
-    const supabase = await createSupabaseServerActionClient()
+    
 
     try {
         const {
@@ -569,24 +534,23 @@ export async function getArchivedConsumables() {
             .from("consumables")
             .select("*")
             .eq("user_id", user.id)
-            .eq("archived", true)
-            .order("updated_at", { ascending: false })
+            .order("created_at", { ascending: false })
 
         if (error) {
             console.error("Database error:", error)
-            return { data: [], error: "Failed to fetch archived consumables" }
+            return { data: [], error: "Failed to fetch consumables" }
         }
 
         return { data: data as Consumable[], error: null }
     } catch (error) {
-        console.error("Get archived consumables error:", error)
+        console.error("Get consumables error:", error)
         return { data: [], error: "An unexpected error occurred" }
     }
 }
 
 export async function getToleranceTracking() {
     const supabase = await createSupabaseServerActionClient()
-
+    
 
     try {
         const {
@@ -617,7 +581,7 @@ export async function getToleranceTracking() {
 
 export async function getBudgetSettings() {
     const supabase = await createSupabaseServerActionClient()
-
+    
 
     try {
         const {
@@ -645,7 +609,7 @@ export async function getBudgetSettings() {
 
 export async function getBudgetAlerts() {
     const supabase = await createSupabaseServerActionClient()
-
+    
 
     try {
         const {
@@ -677,7 +641,7 @@ export async function getBudgetAlerts() {
 
 export async function acknowledgeAlert(alertId: string) {
     const supabase = await createSupabaseServerActionClient()
-
+    
 
     try {
         const {
@@ -712,7 +676,7 @@ export async function acknowledgeAlert(alertId: string) {
 
 export async function getConsumptionEntries(limit = 50) {
     const supabase = await createSupabaseServerActionClient()
-
+    
 
     try {
         const {
@@ -744,7 +708,7 @@ export async function getConsumptionEntries(limit = 50) {
 
 export async function getConsumptionStats() {
     const supabase = await createSupabaseServerActionClient()
-
+    
 
     try {
         const {
@@ -781,7 +745,7 @@ export async function getConsumptionStats() {
 // Add mood tracking function
 export async function addMoodTracking(prevState: any, formData: FormData) {
     const supabase = await createSupabaseServerActionClient()
-
+    
 
     try {
         const {
@@ -894,7 +858,7 @@ export async function addMoodTracking(prevState: any, formData: FormData) {
 // Update post-consumption mood
 export async function updatePostMood(prevState: any, formData: FormData) {
     const supabase = await createSupabaseServerActionClient()
-
+    
 
     try {
         const {
@@ -987,7 +951,7 @@ export async function updatePostMood(prevState: any, formData: FormData) {
 // Helper function to update mood correlations
 async function updateMoodCorrelations(userId: string, consumptionEntryId: string) {
     const supabase = await createSupabaseServerActionClient()
-
+    
 
     try {
         // Get consumption entry details
@@ -1054,7 +1018,7 @@ async function updateMoodCorrelations(userId: string, consumptionEntryId: string
 // Get mood tracking data
 export async function getMoodTracking() {
     const supabase = await createSupabaseServerActionClient()
-
+    
 
     try {
         const {
@@ -1089,7 +1053,7 @@ export async function getMoodTracking() {
 // Get mood correlations
 export async function getMoodCorrelations() {
     const supabase = await createSupabaseServerActionClient()
-
+    
 
     try {
         const {
@@ -1121,7 +1085,7 @@ export async function getMoodCorrelations() {
 // Get pending mood updates (sessions without post-mood data)
 export async function getPendingMoodUpdates() {
     const supabase = await createSupabaseServerActionClient()
-
+    
 
     try {
         const {
@@ -1280,7 +1244,8 @@ export async function deleteConsumptionEntry(prevState: any, formData: FormData)
 // =================== CONSUMABLE MANAGEMENT ===================
 
 export async function editConsumable(prevState: any, formData: FormData) {
-    const supabase = await createSupabaseServerActionClient();
+    const cookieStore = await cookies();
+    const supabase = createServerActionClient({ cookies: () => Promise.resolve(cookieStore) });
 
     try {
         const {
@@ -1344,7 +1309,8 @@ export async function editConsumable(prevState: any, formData: FormData) {
 }
 
 export async function deleteConsumable(prevState: any, formData: FormData) {
-    const supabase = await createSupabaseServerActionClient();
+    const cookieStore = await cookies();
+    const supabase = createServerActionClient({ cookies: () => Promise.resolve(cookieStore) });
 
     try {
         const {
@@ -1404,8 +1370,11 @@ export async function deleteConsumable(prevState: any, formData: FormData) {
     }
 }
 
-export async function archiveConsumable(prevState: any, formData: FormData) {
-    const supabase = await createSupabaseServerActionClient();
+// =================== RAW PRODUCT MANAGEMENT ===================
+
+export async function editRawProduct(prevState: any, formData: FormData) {
+    const cookieStore = await cookies();
+    const supabase = createServerActionClient({ cookies: () => Promise.resolve(cookieStore) });
 
     try {
         const {
@@ -1416,49 +1385,67 @@ export async function archiveConsumable(prevState: any, formData: FormData) {
             return { error: "User not authenticated" };
         }
 
-        const consumableId = formData.get("consumable_id") as string;
+        const productId = formData.get("product_id") as string;
+        const strainName = formData.get("strain_name") as string;
+        const type = formData.get("type") as RawProductType;
+        const purchaseDate = formData.get("purchase_date") as string;
+        const cost = Number.parseFloat(formData.get("cost") as string);
+        const totalAmount = Number.parseFloat(formData.get("total_amount") as string);
+        const remainingAmount = Number.parseFloat(formData.get("remaining_amount") as string);
+        const thcContent = Number.parseFloat(formData.get("thc_content") as string);
+        const cbdContent = Number.parseFloat(formData.get("cbd_content") as string);
+        const terpeneProfile = formData.get("terpene_profile") as string;
 
-        if (!consumableId) {
-            return { error: "Missing consumable ID" };
+        if (!productId || !strainName || !type) {
+            return { error: "Missing required fields" };
         }
 
-        // Check if consumable exists and belongs to user
-        const { data: existingConsumable } = await supabase
-            .from("consumables")
+        // Check if raw product exists and belongs to user
+        const { data: existingProduct } = await supabase
+            .from("raw_products")
             .select("*")
-            .eq("id", consumableId)
+            .eq("id", productId)
             .eq("user_id", user.id)
             .single();
 
-        if (!existingConsumable) {
-            return { error: "Consumable not found or you don't have permission to archive it" };
+        if (!existingProduct) {
+            return { error: "Raw product not found or you don't have permission to edit it" };
         }
 
-        // Archive consumable by setting archived = true
+        // Update raw product
         const { error: updateError } = await supabase
-            .from("consumables")
+            .from("raw_products")
             .update({
-                archived: true,
-                updated_at: new Date().toISOString()
+                strain_name: strainName || existingProduct.strain_name,
+                type: type || existingProduct.type,
+                purchase_date: purchaseDate || existingProduct.purchase_date,
+                cost: cost || existingProduct.cost,
+                total_amount: totalAmount || existingProduct.total_amount,
+                remaining_amount: remainingAmount !== undefined ? remainingAmount : existingProduct.remaining_amount,
+                thc_content: thcContent || existingProduct.thc_content,
+                cbd_content: cbdContent || existingProduct.cbd_content,
+                terpene_profile: terpeneProfile || existingProduct.terpene_profile,
+                updated_at: new Date().toISOString(),
             })
-            .eq("id", consumableId)
+            .eq("id", productId)
             .eq("user_id", user.id);
 
         if (updateError) {
-            console.error("Archive consumable error:", updateError);
-            return { error: "Failed to archive consumable" };
+            console.error("Update raw product error:", updateError);
+            return { error: "Failed to update raw product" };
         }
 
         revalidatePath("/");
-        return { success: "Consumable archived successfully" };
+        return { success: "Raw product updated successfully" };
     } catch (error) {
-        console.error("Archive consumable error:", error);
+        console.error("Edit raw product error:", error);
         return { error: "An unexpected error occurred" };
     }
 }
 
-export async function unarchiveConsumable(prevState: any, formData: FormData) {
-    const supabase = await createSupabaseServerActionClient();
+export async function deleteRawProduct(prevState: any, formData: FormData) {
+    const cookieStore = await cookies();
+    const supabase = createServerActionClient({ cookies: () => Promise.resolve(cookieStore) });
 
     try {
         const {
@@ -1469,43 +1456,51 @@ export async function unarchiveConsumable(prevState: any, formData: FormData) {
             return { error: "User not authenticated" };
         }
 
-        const consumableId = formData.get("consumable_id") as string;
+        const productId = formData.get("product_id") as string;
 
-        if (!consumableId) {
-            return { error: "Missing consumable ID" };
+        if (!productId) {
+            return { error: "Missing product ID" };
         }
 
-        // Check if consumable exists and belongs to user
-        const { data: existingConsumable } = await supabase
-            .from("consumables")
+        // Check if raw product exists and belongs to user
+        const { data: existingProduct } = await supabase
+            .from("raw_products")
             .select("*")
-            .eq("id", consumableId)
+            .eq("id", productId)
             .eq("user_id", user.id)
             .single();
 
-        if (!existingConsumable) {
-            return { error: "Consumable not found or you don't have permission to unarchive it" };
+        if (!existingProduct) {
+            return { error: "Raw product not found or you don't have permission to delete it" };
         }
 
-        // Unarchive consumable by setting archived = false
-        const { error: updateError } = await supabase
+        // Check if raw product is being used in any consumables
+        const { data: usageConsumables } = await supabase
             .from("consumables")
-            .update({
-                archived: false,
-                updated_at: new Date().toISOString()
-            })
-            .eq("id", consumableId)
+            .select("id")
+            .eq("product_id", productId)
+            .limit(1);
+
+        if (usageConsumables && usageConsumables.length > 0) {
+            return { error: "Cannot delete raw product that has been converted to consumables. Archive it instead." };
+        }
+
+        // Delete raw product
+        const { error: deleteError } = await supabase
+            .from("raw_products")
+            .delete()
+            .eq("id", productId)
             .eq("user_id", user.id);
 
-        if (updateError) {
-            console.error("Unarchive consumable error:", updateError);
-            return { error: "Failed to unarchive consumable" };
+        if (deleteError) {
+            console.error("Delete raw product error:", deleteError);
+            return { error: "Failed to delete raw product" };
         }
 
         revalidatePath("/");
-        return { success: "Consumable unarchived successfully" };
+        return { success: "Raw product deleted successfully" };
     } catch (error) {
-        console.error("Unarchive consumable error:", error);
+        console.error("Delete raw product error:", error);
         return { error: "An unexpected error occurred" };
     }
 }

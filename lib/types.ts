@@ -19,28 +19,35 @@ export interface RawProduct {
     id: string
     user_id: string
     strain_name: string
-    type: RawProductType
+    product_type: RawProductType
     purchase_date: string
-    cost: number
-    total_amount: number
-    remaining_amount: number
+    cost?: number
+    current_amount: number
+    original_amount: number
+    unit: string
     thc_content?: number
     cbd_content?: number
-    terpene_profile?: string
+    source?: string
+    quality_notes?: string
     created_at: string
+    updated_at?: string
 }
 
 export interface Consumable {
     id: string
     user_id: string
-    type: ConsumableType
+    consumable_type: ConsumableType
     name: string
     product_id?: string
-    total_units: number
-    remaining_units: number
-    weight_per_unit: number
-    cost_per_unit: number
+    quantity: number
+    grams_per_unit: number
+    source_strain?: string
+    thc_content?: number
+    cost_per_unit?: number
+    notes?: string
+    archived?: boolean
     created_at: string
+    updated_at?: string
 }
 
 export interface ToleranceTracking {
@@ -247,3 +254,15 @@ export const ACTIVITIES = {
     sleep: { label: "Sleep preparation", icon: "moon" },
     other: { label: "Other", icon: "more-horizontal" }
 } as const
+
+export interface InventoryItem {
+    id: string
+    user_id: string
+    product_name: string
+    current_amount: number
+    purchase_date: string
+    cost?: number
+    notes?: string
+    created_at: string
+    updated_at: string
+}

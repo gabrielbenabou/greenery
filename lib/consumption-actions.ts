@@ -1509,3 +1509,157 @@ export async function unarchiveConsumable(prevState: any, formData: FormData) {
         return { error: "An unexpected error occurred" };
     }
 }
+
+export async function editRawProduct(prevState: any, formData: FormData) {
+    const supabase = await createSupabaseServerActionClient();
+
+    try {
+        const {
+            data: { user },
+        } = await supabase.auth.getUser();
+
+        if (!user) {
+            return { error: "User not authenticated" };
+        }
+
+        const rawProductId = formData.get("raw_product_id") as string;
+        const strainName = formData.get("strain_name") as string;
+        const productType = formData.get("product_type") as string;
+        const currentAmount = formData.get("current_amount") as string;
+        const originalAmount = formData.get("original_amount") as string;
+        const cost = formData.get("cost") as string;
+        const thcContent = formData.get("thc_content") as string;
+        const cbdContent = formData.get("cbd_content") as string;
+        const source = formData.get("source") as string;
+        const qualityNotes = formData.get("quality_notes") as string;
+
+        if (!rawProductId) {
+            return { error: "Missing raw product ID" };
+        }
+
+        if (!strainName?.trim()) {
+            return { error: "Please enter a strain name" };
+        }
+
+        if (!currentAmount || Number(currentAmount) < 0) {
+            return { error: "Please enter a valid current amount" };
+        }
+
+        if (!originalAmount || Number(originalAmount) < 0) {
+            return { error: "Please enter a valid original amount" };
+        }
+
+        // Check if raw product exists and belongs to user
+        const { data: existingProduct } = await supabase
+            .from("raw_products")
+            .select("*")
+            .eq("id", rawProductId)
+            .eq("user_id", user.id)
+            .single();
+
+        if (!existingProduct) {
+            return { error: "Raw product not found or you don't have permission to edit it" };
+        }
+
+        // Update raw product
+        const { error: updateError } = await supabase
+            .from("raw_products")
+            .update({
+                strain_name: strainName.trim(),
+                product_type: productType,
+                current_amount: Number(currentAmount),
+                original_amount: Number(originalAmount),
+                cost: cost ? Number(cost) : null,
+                thc_content: thcContent ? Number(thcContent) : null,
+                cbd_content: cbdContent ? Number(cbdContent) : null,
+                source: source?.trim() || null,
+                quality_notes: qualityNotes?.trim() || null,
+                updated_at: new Date().toISOString(),
+            })
+            .eq("id", rawProductId)
+            .eq("user_id", user.id);
+
+        if (updateError) {
+            console.error("Update raw product error:", updateError);
+            return { error: "Failed to update raw product" };
+        }
+
+        revalidatePath("/");
+        return { success: "Raw product updated successfully" };
+    } catch (error) {
+        console.error("Edit raw product error:", error);
+        return { error: "An unexpected error occurred" };
+    }
+}
+
+export async function deleteRawProduct(prevState: any, formData: FormData) {
+    const supabase = await createSupabaseServerActionClient();
+
+    try {
+        const {
+            data: { user },
+        } = await supabase.auth.getUser();
+
+        if (!user) {
+            return { error: "User not authenticated" };
+        }
+
+        const rawProductId = formData.get("raw_product_id") as string;
+
+        if (!rawProductId) {
+            return { error: "Missing raw product ID" };
+        }
+
+        // Check if raw product exists and belongs to user
+        const { data: existingProduct } = await supabase
+            .from("raw_products")
+            .select("*")
+            .eq("id", rawProductId)
+            .eq("user_id", user.id)
+            .single();
+
+        if (!existingProduct) {
+            return { error: "Raw product not found or you don't have permission to delete it" };
+        }
+
+        // Check if raw product is being used in any consumables
+        const { data: relatedConsumables } = await supabase
+            .from("consumables")
+            .select("id")
+            .eq("product_id", rawProductId)
+            .limit(1);
+
+        if (relatedConsumables && relatedConsumables.length > 0) {
+            return { error: "Cannot delete raw product that has related consumables" };
+        }
+
+        // Check if raw product is being used in any consumption entries
+        const { data: relatedEntries } = await supabase
+            .from("consumption_entries")
+            .select("id")
+            .eq("product_name", existingProduct.strain_name)
+            .limit(1);
+
+        if (relatedEntries && relatedEntries.length > 0) {
+            return { error: "Cannot delete raw product that has consumption entries" };
+        }
+
+        // Delete raw product
+        const { error: deleteError } = await supabase
+            .from("raw_products")
+            .delete()
+            .eq("id", rawProductId)
+            .eq("user_id", user.id);
+
+        if (deleteError) {
+            console.error("Delete raw product error:", deleteError);
+            return { error: "Failed to delete raw product" };
+        }
+
+        revalidatePath("/");
+        return { success: "Raw product deleted successfully" };
+    } catch (error) {
+        console.error("Delete raw product error:", error);
+        return { error: "An unexpected error occurred" };
+    }
+}
